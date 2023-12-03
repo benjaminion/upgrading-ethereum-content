@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8">
+    <title>Charts</title>
+    <script src="./roughviz.min.js">
+      // Get it from https://github.com/benjaminion/roughViz/tree/master/dist
+    </script>
+    <script src="./svg-text-to-path.js">
+      // Get it from https://github.com/paulzi/svg-text-to-path/tree/master/dist
+    </script>
+    <style>
+      div.svg {border: solid black 1px; margin: 1ex 0;}
+      div.all {width: 1200px; margin: 10ex auto;}
+      @font-face {
+        font-family: "MyGaegu";
+        src: url(./font/Gaegu-Light.ttf);
+      }
+    </style>
+  </head>
+  <body>
+
+<div class="all">
+
+<script>
+  // set some defaults
+  opts = {
+    width: 1200,
+    height: 600,
+    roughness: 1,
+    bowing: 0,
+    simplification: 0.2,
+    colors: ["black"],
+    strokeWidth: 1.5,
+    axisRoughness: 1,
+    axisStrokeWidth: 1.0,
+    axisFontSize: 20,
+    labelFontSize: 30,
+    legend: false,
+    interactive: false,
+    font: 'MyGaegu',
+  };
+
+  // Maths utilities
+  const fac = [];
+  fac[0] = 1n;
+  for (var i = 1; i <= 256; i++) {
+    fac[i] = BigInt(i) * fac[i - 1];
+  }
+
+  function choose(n, k) {
+    return fac[n] / fac[k] / fac[n-k];
+  }
+
+  function prob(n, k, p) {
+    return (Math.pow(p, k) * Math.pow((1 - p), (n - k)) * Number(choose(n, k)));
+  }
+
+  // Parameters for replacing text with SVG paths
+  params = {
+    'fontMap': {
+      'MyGaegu': {
+        '400': './font/Gaegu-Light.ttf'
+      }
+    },
+    'decimals': 1,
+    'merged': true
+  }
+
+  function remove_attributes(elements, attr) {
+    for (let e of elements) {
+      e.removeAttribute(attr);
+    }
+  };
+
+  function remove_elements(elements) {
+    for (let e of elements) {
+      e.remove();
+    }
+  };
+
+  // Make a download link for the SVG data
+  async function makeLink(id) {
+    const div = document.getElementById(id);
+
+    if (div === null) {
+      throw 'Error: Id "' + id + '" is missing.';
+    }
+
+    const svg = div.firstChild;
+
+    // Convert text nodes to paths
+    const result = await SvgTextToPath.replaceAll(svg, params);
+
+    // Get rid of some left-over cruft
+    remove_attributes(svg.getElementsByClassName('labelText'), 'style');
+    remove_attributes(svg.getElementsByClassName('notesText'), 'style');
+    remove_attributes(svg.querySelectorAll('g.tick > path'), 'style');
+    remove_attributes(svg.querySelectorAll('[font-size]'), 'font-size');
+    remove_attributes(svg.querySelectorAll('[font-family]'), 'font-family');
+    remove_attributes(svg.querySelectorAll('[text-anchor]'), 'text-anchor');
+    remove_attributes(svg.querySelectorAll('[class="' + id + '"]'), 'class');
+    remove_elements(svg.querySelectorAll('path[stroke="transparent"], path[stroke="none"]'));
+    remove_elements(svg.querySelectorAll('path[d=""]'));
+
+    // Stringify
+    const serializer = new XMLSerializer();
+    var source = serializer.serializeToString(svg);
+
+    // Reduce precision of coords to a max of 1dp to save space (hackily)
+    source = source.replace(/\d+\.\d+/g, s =>
+                         {
+                           const f1dp = parseFloat(s).toFixed(1);
+                           return f1dp.slice(-1) === '0' ? f1dp.slice(0, -2) : f1dp;
+                         });
+
+    // Top and tail for file format
+    source = '<?xml version="1.0" standalone="no"?>\r\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600">' + source + '</svg>';
+
+    // Convert to URI data scheme.
+    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+
+    // Add download link
+    const filename = id + '.svg';
+    const anchor = document.createElement('a');
+    anchor.appendChild(document.createTextNode(filename));
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.paddingLeft = '0.5em';
+    div.appendChild(anchor);
+    if (result.total !== result.success) {
+      div.appendChild(document.createTextNode(' (warning: text replacement failed. Total: ' + result.total + ' Success: ' + result.success + ')'));
+    }
+  }
+</script>
+
+<!-- Issuance Curve - - - - - - - - - - - - - - - - - - - - - - - -  -->
+
+<div class="svg" id="issuance_curve"></div>
+<script>
+  async function do_issuance_curve() {
+    const nPoints = 12;
+    const xVals = [];
+    const yVals = [];
+
+    const epochsPerYear = 365.25 * 225;
+    const xFunc = i => (1 + i) * 50;
+    const yFunc = x => epochsPerYear * 32 * x * 64 / Math.floor(Math.sqrt(1000000000 * 32 * x));
+
+    for (let i = 0; i < nPoints; i++) {
+      xVals[i] = xFunc(i);
+      yVals[i] = yFunc(1000 * xVals[i]) / 1000;
+    }
+
+    new roughViz.Line({
+      element: '#issuance_curve',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y: yVals,
+      },
+      x: xVals,
+      xLabel: "Number of active validators (thousands)",
+      yLabel: "Annual issuance (thousand ETH)",
+      xLabelDelta: 0,
+      yLabelDelta: -10,
+
+      roughness: opts.roughness,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+
+      circle: true,
+      circleRadius: 6,
+      circleRoughness: 1,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      margin: {top: 30, right: 20, bottom: 80, left: 100},
+
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_issuance_curve().then(makeLink('issuance_curve'));
+</script>
+
+<!-- Rewards Curve - - - - - - - - - - - - - - - - - - - - - - - - - -->
+
+<div class="svg" id="rewards_curve"></div>
+<script>
+  async function do_rewards_curve() {
+    const nPoints = 12;
+    const xVals = [];
+    const yVals = [];
+
+    const epochsPerYear = 365.25 * 225;
+    const xFunc = i => (1 + i) * 50;
+    const yFunc = x => epochsPerYear * 64 / Math.floor(Math.sqrt(1000000000 * 32 * x));
+
+    for (let i = 0; i < nPoints; i++) {
+      xVals[i] = xFunc(i);
+      yVals[i] = yFunc(1000 * xVals[i]) * 100;
+    }
+
+    new roughViz.Line({
+      element: '#rewards_curve',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y: yVals,
+      },
+      x: xVals,
+      xLabel: "Number of active validators (thousands)",
+      yLabel: "Annual return on 32 ETH stake (%)",
+      xLabelDelta: 0,
+      yLabelDelta: -10,
+
+      roughness: opts.roughness,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+
+      circle: true,
+      circleRadius: 6,
+      circleRoughness: 1,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      margin: {top: 30, right: 20, bottom: 80, left: 100},
+
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_rewards_curve().then(makeLink('rewards_curve'));
+</script>
+
+<!-- Reward Variance - - - - - - - - - - - - - - - - - - - - - - - - -->
+
+<div class="svg" id="reward_variance"></div>
+<script>
+  async function do_reward_variance() {
+
+    // Data is generated by reward_variance.py
+    new roughViz.Bar({
+      element: '#reward_variance',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        labels: [1.4, 1.425, 1.45, 1.475, 1.5, 1.525, 1.55, 1.575, 1.6, 1.625, 1.65, 1.675, 1.7, 1.725, 1.75, 1.775, 1.8, 1.825, 1.85, 1.875, 1.9, 1.925, 1.95, 1.975],
+        values: [0, 9.012097147132001e-05, 0.0007900030693065276, 0.0034625936780776404, 0.010117724758439453, 0.022222501861968585, 0.03930741130795962, 0.05869508559787125, 0.07667608389578497, 0.09011582615639349, 0.097360246574628, 0.0982297322584306, 0.0935787996300737, 0.08483788991116106, 0.07363622456242747, 0.06149378860071459, 0.04961300241343375, 0.03880057869052064, 0.029494711073457386, 0.021843117625188306, 0.015791505923118995, 0.011164359278243946, 0.007730431979276688, 0],
+      },
+      xLabel: "Annual reward (ETH, 300k validators)",
+      yLabel: "Proportion of validators",
+      xLabelDelta: 0,
+      yLabelDelta: -10,
+
+      roughness: opts.roughness,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      color: 'white',
+      fillStyle: 'solid',
+      strokeWidth: opts.strokeWidth,
+      padding: 0.01,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      margin: {top: 30, right: 20, bottom: 90, left: 100},
+
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+
+  }
+  do_reward_variance().then(makeLink('reward_variance'));
+</script>
+
+<!-- Reward Timeliness against exponential - - - - - - - - - - - - - -->
+
+<div class="svg" id="reward_timeliness"></div>
+<script>
+  async function do_reward_timeliness() {
+    const nPoints = 40;
+    const xVals = [];
+    const y1Vals = [];
+    const y2Vals = [];
+
+    const y1Func = i => {
+      if (i == 0) return 0.844;
+      if (i <= 4) return 0.625;
+      if (i <= 31) return 0.188;
+      return -0.625;
+    }
+    const y2Func = i => -0.6 + 1.44 * Math.exp(-0.1 * i);
+
+    for (let i = 0; i < nPoints; i++) {
+      xVals[i] = (1 + i);
+      y1Vals[i] = y1Func(i);
+      y2Vals[i] = y2Func(i);
+    }
+    xVals[0] = "";
+
+    new roughViz.Line({
+      element: '#reward_timeliness',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y1: y1Vals,
+        y2: y2Vals,
+      },
+      x: xVals,
+      xLabel: "Slots delay",
+      yLabel: "Net attestation reward weight",
+      xLabelDelta: -190,
+      yLabelDelta: -10,
+
+      roughness: 0.7,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      interpolation: ["straight", "curve"],
+      dash: [[0], [8, 6]],
+      strokeWidth: opts.strokeWidth,
+
+      circle: false,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      margin: {top: 30, right: 20, bottom: 30, left: 100},
+
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_reward_timeliness().then(makeLink('reward_timeliness'));
+</script>
+
+<!-- Hysteresis - - - - - - - - - - - - - - - - - - - - - - - - - -  -->
+
+<div class="svg" id="hysteresis"></div>
+<script>
+  async function do_hysteresis() {
+    const xVals = [0];
+    const y1Vals = [32.0, 32.2, 32.4, 32.6, 32.8, 33.0, 33.2, 33.4, 33.2, 33.0, 32.8, 32.6, 32.4, 32.2, 32.0, 31.8, 31.6, 31.8, 32.0, 32.2, 32.0, 31.8, 32.0, 32.2, 32.0, 31.8, 32.0, 32.2, 32.4, 32.2, 32.0, 31.8, 32.0, 32.2, 32.4, 32.6];
+    const y2Vals = [32.0];
+    const nPoints = y1Vals.length;
+
+    const y2Func = (eb, y) => {
+      if (y > eb + 1.25) return eb == 32 ? 32 : eb + 1;
+      if (y < eb - 0.25) return eb - 1;
+      return eb;
+    }
+
+    for (let i = 1; i < nPoints; i++) {
+      xVals[i] = i;
+      y2Vals[i] = y2Func(y2Vals[i - 1], y1Vals[i]);
+    }
+
+    new roughViz.Line({
+      element: '#hysteresis',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      x: xVals,
+      data: {
+        y1: y1Vals,
+        y2: y2Vals,
+      },
+      yDomain: [30, 34],
+      yLabel: "Balance / Effective Balance (ETH)",
+      yLabelDelta: -10,
+      xAxis: false,
+
+      roughness: 0.7,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      interpolation: ["straight"],
+      dash: [[0], [10, 10]],
+      strokeWidth: opts.strokeWidth,
+
+      circle: false,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      yLines: [
+        {y: 31.75, dash: [2, 6]},
+        {y: 32.25, dash: [2, 6]},
+      ],
+
+      margin: {top: 30, right: 20, bottom: 30, left: 100},
+
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_hysteresis().then(makeLink('hysteresis'));
+</script>
+
+<!-- Leak Scores and Balances - - - - - - - - - - - - - - - - - - -  -->
+
+<div class="svg" id="inactivity_scores"></div>
+<div class="svg" id="inactivity_balances"></div>
+<script>
+  async function do_inactivity() {
+    const nEpochs = 150;
+    const xInterval = 5;
+    const xVals = [];
+    const y1Score = []; // Always online
+    const y2Score = []; // 90% online
+    const y3Score = []; // 70% online
+    const y4Score = []; // Offline
+    const y5Score = []; // Temporarily offline
+
+    const y1Balance = []; // Always online
+    const y2Balance = []; // 90% online
+    const y3Balance = []; // 70% online
+    const y4Balance = []; // Offline
+    const y5Balance = []; // Temporarily offline
+
+    const leakEnd = 100;
+    const offlineStart = 50;
+    const offlineEnd = 75;
+
+    const scoreUpdate = (score, inLeak, isOnline) => {
+      return Math.max(0, score + (isOnline ? -1 : 4) + (inLeak ? 0 : -16));
+    }
+
+    const balanceUpdate = (balance, score) => {
+      const inactivity_penalty_quotient = 50331648; // 3 * 2**24 (Altair)
+      const inactivity_score_bias = 4;
+      // Assume effective balance does not fall below 32 (i.e. balance remains above 31.75)
+      return balance - 32 * score / (inactivity_score_bias * inactivity_penalty_quotient);
+    }
+
+    var y1s = y2s = y3s = y4s = y5s = 0;
+    var y1b = y2b = y3b = y4b = y5b = 32;
+    for (let i = 0; i < nEpochs; i++) {
+      var inLeak = (i < leakEnd);
+      if (i % xInterval === 0) {
+        var idx = i / xInterval;
+        xVals[idx] = i;
+        y1Score[idx] = y1s;
+        y2Score[idx] = y2s;
+        y3Score[idx] = y3s;
+        y4Score[idx] = y4s;
+        y5Score[idx] = y5s;
+        y1Balance[idx] = y1b;
+        y2Balance[idx] = y2b;
+        y3Balance[idx] = y3b;
+        y4Balance[idx] = y4b;
+        y5Balance[idx] = y5b;
+      }
+      y1s = scoreUpdate(y1s, inLeak, true);
+      y2s = scoreUpdate(y2s, inLeak, i % 10 < 9);
+      y3s = scoreUpdate(y3s, inLeak, i % 10 < 7);
+      y4s = scoreUpdate(y4s, inLeak, false);
+      y5s = scoreUpdate(y5s, inLeak, (i < offlineStart) || (i >= offlineEnd));
+      y1b = balanceUpdate(y1b, y1s);
+      y2b = balanceUpdate(y2b, y2s);
+      y3b = balanceUpdate(y3b, y3s);
+      y4b = balanceUpdate(y4b, y4s);
+      y5b = balanceUpdate(y5b, y5s);
+    }
+    xVals[leakEnd / xInterval] = "End";
+    xVals[offlineStart / xInterval] = "A";
+    xVals[offlineEnd / xInterval] = "B";
+
+    const dashPattern = [[2, 6], [6, 6], [10, 6], [0], [10, 6, 4, 6]];
+    const margin = {top: 30, right: 20, bottom: 80, left: 120};
+
+    const xLines = [
+      {x: leakEnd, dash: [4, 8]},
+      {x: offlineStart, dash: [2, 10]},
+      {x: offlineEnd, dash: [2, 10]},
+    ];
+
+    new roughViz.Line({
+      element: '#inactivity_scores',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y1: y1Score,
+        y2: y2Score,
+        y3: y3Score,
+        y4: y4Score,
+        y5: y5Score,
+      },
+      x: xVals,
+      xLabel: "Epochs since leak start",
+      yLabel: "Inactivity score",
+      xLabelDelta: 0,
+      yLabelDelta: -10,
+      yDomain: [-40, 420],
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["straight"],
+      dash: dashPattern,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      notes: [
+        {x: 200, y: 270, text: "Always offline"},
+        {x: 454, y: 350, text: "Temporarily"},
+        {x: 430, y: 375, text: "offline"},
+        {x: 620, y: 390, text: "70% online"},
+        {x: 620, y: 436, text: "90% online"},
+        {x: 630, y: 473, text: "Always online"},
+      ],
+      notesFontSize: 0.8 * opts.labelFontSize,
+
+      xLines: xLines,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+
+    new roughViz.Line({
+      element: '#inactivity_balances',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y1: y1Balance,
+        y2: y2Balance,
+        y3: y3Balance,
+        y4: y4Balance,
+        y5: y5Balance,
+      },
+      x: xVals,
+      yValueFormat: ".4f",
+      xLabel: "Epochs since leak start",
+      yLabel: "Balance (ETH)",
+      xLabelDelta: 0,
+      yLabelDelta: -20,
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+      dash: dashPattern,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      notes: [
+        {x: 170, y: 80, text: "Always offline"},
+        {x: 876, y: 105, text: "Temporarily offline"},
+        {x: 840, y: 62, text: "70% online"},
+        {x: 1000, y: 47, text: "90% online"},
+        {x: 990, y: 13, text: "Always online"},
+      ],
+      notesFontSize: 0.8 * opts.labelFontSize,
+
+      xLines: xLines,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_inactivity().then(makeLink('inactivity_scores')).then(makeLink('inactivity_balances'));
+</script>
+
+<!-- RANDAO expected tail  - - - - - - - - - - - - - - - - - - - - - - - - -  -->
+
+<div class="svg" id="randao_tail"></div>
+<script>
+{
+  const margin = {top: 30, right: 20, bottom: 80, left: 120};
+  const xValueFormat = ".2f";
+
+  const rs = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95];
+
+  const ys = [];
+  for (let j = 0; j < rs.length; j++) {
+    let sum = 0;
+    let r = rs[j];
+    for (let i = 1; i < 32; i++) {
+      sum += i * (1 - r) * Math.pow(r, i)
+    }
+    sum += 32 * Math.pow(r, 32);
+    ys[j] = sum;
+  }
+
+  async function do_randao_tail() {
+
+    const xVals = rs;
+    const yVals = ys;
+
+    new roughViz.Line({
+      element: '#randao_tail',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y0: yVals,
+      },
+      x: xVals,
+      xValueFormat: xValueFormat,
+      xLabel: "Fraction of stake",
+      yLabel: "Expected tail length",
+      xLabelDelta: 10,
+      yLabelDelta: -10,
+      yDomain: [0, 16],
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+      dash: [[0]],
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_randao_tail().then(makeLink('randao_tail'));
+}
+</script>
+
+<!-- RANDAO manipulation probabilities - - - - - - - - - - - - - - - - - - -  -->
+
+<div class="svg" id="randao_extend_0"></div>
+<div class="svg" id="randao_extend_1"></div>
+<div class="svg" id="randao_extend_2"></div>
+<script>
+{
+  const margin = {top: 30, right: 20, bottom: 80, left: 120};
+  const xValueFormat = ".2f";
+
+  // Data is generated by randao_extend.py
+  const rs = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95];
+  const expected = [[0.05263157894737125, 0.11111111111111083, 0.17647058823529138, 0.2500000000000049, 0.33333333333333326, 0.4285714285714217, 0.5384615384615318, 0.6666666666665445, 0.8181818181752902, 0.9999999997671694, 1.2222222162138612, 1.499999880620087, 1.8571409425663519, 2.3333075633542677, 2.9996986427228354, 3.996830873499423, 5.635425065092333, 8.690968456173678, 15.319481795288468], [0.10275689223057916, 0.21212121212121138, 0.32992327365728136, 0.45833333333334336, 0.5999999999999999, 0.7582417582417407, 0.9373219373219239, 1.142857142856896, 1.382445141052778, 1.6666666662010055, 2.0107526761553265, 2.437499761240182, 2.9826801535317493, 3.705830813100236, 4.713683012705124, 6.215885085150261, 8.66732566477043, 13.12380535945681, 21.729892161223425], [0.19598253427326418, 0.3877423778413869, 0.5808141464366708, 0.7806555004135871, 0.9929038281979446, 1.2237098918505709, 1.4801868954314616, 1.7710412193165848, 2.1075018857114847, 2.504761903830583, 2.9843358775701074, 3.578143279983383, 4.336047775082686, 5.340841805988679, 6.740570710506908, 8.823617894625366, 12.194526020685148, 18.06697710827241, 27.30945443318643], [0.357457634073854, 0.6556487576187894, 0.9253953072072821, 1.1890002122241459, 1.4627554881287206, 1.7593362463239552, 2.0900083182193856, 2.4666653727207892, 2.903847102223588, 3.421077723952938, 4.046149957682172, 4.820512023724713, 5.809092567313668, 7.119776279069851, 8.945022435171106, 11.654537854596414, 15.97559482789839, 22.95835287109394, 30.705436257711355], [0.6012353952311867, 0.9808973344212415, 1.2930878403157218, 1.6037312843548415, 1.938051798135357, 2.3069633205642956, 2.719860142435241, 3.189533805139796, 3.7338436623721054, 4.377377898027468, 5.154936551540501, 6.1181642006895505, 7.347840809459031, 8.978047139132673, 11.246794963292693, 14.599894518642458, 19.811546319027308, 27.189459104613825, 31.856591150431434], [0.8874673968725844, 1.2757423004956023, 1.63318672807726, 2.017740689621008, 2.427855471688538, 2.8716756190689576, 3.365979841885714, 3.9291858046005004, 4.582587744294847, 5.355175837653363, 6.288631674632635, 7.444967910220876, 8.921146136545428, 10.877869841796867, 13.597933765181864, 17.58696089114304, 23.51067995495982, 30.167007768374994, 31.997206004754553], [1.1188923229778278, 1.5423403193077867, 1.9990602229088066, 2.451385156992682, 2.921839857157497, 3.439605310520626, 4.018877246147075, 4.677308590218266, 5.440930349663742, 6.343990319872229, 7.435090224938245, 8.786705267036007, 10.51213149694058, 12.798670994995652, 15.97078628606694, 20.55877218239938, 26.83935402278406, 31.616144380615932, 31.999998193898893], [1.289449239452435, 1.858090371317713, 2.371094481977388, 2.872608856400802, 3.419301235772155, 4.013090872299955, 4.675117157470178, 5.429547001579636, 6.304117371764362, 7.3383760539724365, 8.588006372365996, 10.135996000498631, 12.112017149550038, 14.72947157297657, 18.347474015717555, 23.451461516362283, 29.4938959170579, 31.97391627316921, 31.999999999998657], [1.5063062504841374, 2.177759693598651, 2.7204534857085942, 3.307346311647459, 3.917686615222735, 4.586595194251593, 5.333790973426824, 6.183821851970284, 7.169738674992567, 8.335563484370708, 9.744170158351777, 11.489080145578013, 13.716287611426596, 16.664068867212478, 20.711861433716276, 26.16949478711395, 31.178060451141057, 31.999801306288216, 31.999999999999986], [1.7877700016284033, 2.4506232337692406, 3.0962314783384315, 3.7346897852890892, 4.417164794889404, 5.16162808076439, 5.993090271790841, 6.9392096665169, 8.036577487749835, 9.334155797219028, 10.901961945149434, 12.844055191756928, 15.322573373171457, 18.59810616589354, 23.04200296523629, 28.56019106915315, 31.868888163589663, 31.999999980493957, 31.999999999999986], [2.0498126856597203, 2.7496558622504246, 3.461703175706861, 4.164872052724567, 4.916643037030477, 5.737279377342842, 6.652644996971606, 7.695207448237648, 8.904021418961035, 10.333451524377397, 12.060567665421019, 14.199954110228253, 16.92950104569677, 20.52694777623487, 25.30041702669018, 30.409143249570114, 31.99473298070736, 32.0, 31.999999999999986], [2.2333245303334204, 3.078882807862448, 3.8157250231625013, 4.598411685518677, 5.416630689781794, 6.312070763358907, 7.31293206295597, 8.45143446308306, 9.771764631361728, 11.333099124125944, 13.219578219672066, 15.556269492588834, 18.5360156930344, 22.443416595547802, 27.419904833814446, 31.52173461763725, 31.99998610646656, 32.0, 31.999999999999986], [2.4273098571189893, 3.364168124240194, 4.195449802535298, 5.023747987529886, 5.916381827456377, 6.888630180214186, 7.973011538680309, 9.207715976080364, 10.63965727628524, 12.33292254511194, 14.378786616727009, 16.91270155702841, 20.140856744830952, 24.334385884901828, 29.286413349403315, 31.935382688666568, 31.999999999850914, 32.0, 31.999999999999986]];
+  const prob_dec = [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0.9025, 0.81, 0.7224999999999999, 0.6400000000000001, 0.5625, 0.48999999999999994, 0.42250000000000004, 0.36, 0.30250000000000005, 0.25, 0.20249999999999996, 0.16000000000000003, 0.12249999999999998, 0.09000000000000002, 0.0625, 0.03999999999999998, 0.022500000000000006, 0.009999999999999995, 0.0025000000000000044], [0.9900374375390624, 0.9605960100000001, 0.9129921937890626, 0.8493465600000003, 0.7724761962890625, 0.6857496099999998, 0.5929096250390624, 0.49787136, 0.40450395003906264, 0.31640625, 0.23668833128906247, 0.16777216, 0.11122641878906245, 0.06765201000000004, 0.0366363525390625, 0.016796159999999984, 0.005929962539062502, 0.0013032099999999989, 9.036878906250033e-05], [0.9990004373906417, 0.9920279440699441, 0.973316793729638, 0.9377636128923159, 0.8816264350298333, 0.8033461600955809, 0.704286365475572, 0.5891241008203073, 0.4656217526275575, 0.34360891580581665, 0.23322002813860482, 0.14273434994667497, 0.07664797201295727, 0.03471546257339889, 0.01247883380245085, 0.0032163149989349873, 0.000491556156639796, 2.909071040502414e-05, 1.712242448075139e-07], [0.9999000046873625, 0.9984011994401824, 0.9919306821489504, 0.9747049181218859, 0.9392980958938163, 0.8779832774762397, 0.785119198012139, 0.6603837903587233, 0.5117436099379112, 0.3560741304517928, 0.21535308754295868, 0.10851808410760551, 0.04301978326824327, 0.012362409125215284, 0.002273889383407967, 0.00021794232571150878, 7.426009297133897e-06, 3.82749659620575e-08, 1.9645744801607117e-12], [0.9999900000484364, 0.9996800495950412, 0.9975728580151781, 0.9898106282471153, 0.9692184356283225, 0.9250988967914954, 0.8449203477209792, 0.7193773278812381, 0.5510079377007696, 0.3620552892563166, 0.19157986817237108, 0.07499055253703457, 0.019320376235181298, 0.002771897314680955, 0.00017188361205231186, 3.0369174235274227e-06, 7.075501073634908e-09, 3.9125902320861526e-13, 2.2127601617218643e-21], [0.9999990000004888, 0.9999360020159597, 0.9992712615070529, 0.9959122466246896, 0.9844945589235832, 0.9543994214590585, 0.8889117939808944, 0.7689861335405376, 0.5864547467150791, 0.3649865242439075, 0.16587147370786245, 0.04698690159335716, 0.006614256252484605, 0.0003319314954942692, 3.568804673000933e-06, 3.549631279491067e-09, 6.927293963647933e-14, 8.490126976231882e-22, 1.197005651110712e-37], [0.9999999000000006, 0.9999872000812837, 0.9997813237263042, 0.9983629309759001, 0.9922177016874548, 0.9723916130799655, 0.9209212010168063, 0.810675695915375, 0.6192831019737897, 0.36643771592203755, 0.14033773387668633, 0.026402675132206965, 0.0016062156864887075, 1.668800177912824e-05, 1.0849514608715946e-08, 8.247161706662705e-14, 3.2654579043383333e-22, 6.763903760978058e-37, 2.3920336828590893e-67], [0.9999999900000014, 0.9999974400032705, 0.9999343921438792, 0.9993448538631703, 0.9961013397836809, 0.9833435672259209, 0.9439760331404331, 0.8454999585967968, 0.6499696989161974, 0.36715975489153607, 0.11618009117003028, 0.01308437286869258, 0.0002509893811128812, 2.503611364514657e-07, 1.8712544540762926e-12, 3.819560646025089e-21, 4.2726310423825134e-36, 2.5869953361223644e-63, 8.599315745679746e-122], [0.9999999990000303, 0.9999994880001456, 0.9999803171933209, 0.9997378902896864, 0.9980487773894428, 0.9899728156390364, 0.9604482299095564, 0.8743842774314049, 0.6787060645489055, 0.36751989125453444, 0.09410030174411863, 0.005594587270064571, 2.2190208089771118e-05, 6.93349901595476e-10, 4.407665990511204e-18, 8.97942820569536e-33, 2.6050881154479527e-59, 1.0645915533551997e-109, 5.879555627528288e-222], [0.9999999999001349, 0.9999998976000288, 0.999994095117398, 0.9998951478920881, 0.9990239137167762, 0.9939716086573427, 0.9721473274879182, 0.8981844666953158, 0.7055780964764727, 0.36769973941127077, 0.0744942803954426, 0.002008169321236563, 9.380259388670011e-07, 1.807137528373072e-13, 1.6734052711692776e-26, 3.05851438705004e-51, 3.1497082521542855e-98, 2.1210222986905454e-191, 0.0], [0.999999999990421, 0.9999999795200313, 0.9999982285315324, 0.9999580578393448, 0.9995118378817168, 0.9963785993718465, 0.9804208478814848, 0.9176849422697053, 0.7306398361863763, 0.3677896085775189, 0.05754972480765902, 0.0005851780155201035, 1.5222694625872885e-08, 1.7248793110301221e-18, 4.1517257480965484e-39, 1.3054262602723752e-80, 1.3013351780862635e-163, 0.0, 0.0], [0.9999999999999989, 0.9999999959040569, 0.999999468559057, 0.9999832229250637, 0.9997558891676285, 0.997825584559181, 0.9862540399195812, 0.9335879984685753, 0.7539424244445759, 0.3678345294443425, 0.04329875699495249, 0.00013291260394968917, 7.126631669856064e-11, 1.6075287885970581e-25, 5.496980421012695e-58, 2.2584523132927735e-127, 1.1551311712784704e-273, 0.0, 0.0]];
+
+  async function do_randao_extend_0() {
+
+    const xVals = rs;
+    const yVals = expected;
+
+    const dashPattern = [[0], [13, 8], [12, 8], [11, 8], [10, 8], [9, 8], [8, 8], [7, 8], [6, 8], [5, 8], [3, 8], [2, 8], [1, 8]];
+
+    new roughViz.Line({
+      element: '#randao_extend_0',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y0: yVals[0],
+        y1: yVals[1],
+        y2: yVals[2],
+        y3: yVals[3],
+        y4: yVals[4],
+        y5: yVals[5],
+        y6: yVals[6],
+        y7: yVals[7],
+        y8: yVals[8],
+        y9: yVals[9],
+        y10: yVals[10],
+        y11: yVals[11],
+        y12: yVals[12],
+      },
+      x: xVals,
+      xValueFormat: xValueFormat,
+      xLabel: "Fraction of stake",
+      yLabel: "Expected tail length",
+      xLabelDelta: 10,
+      yLabelDelta: -10,
+      yDomain: [0, 16],
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+      dash: dashPattern,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      notes: [
+        {x: 800, y: 440, text: "k = 0"},
+        {x: 400, y: 180, text: "k = 12"},
+      ],
+      notesFontSize: 0.8 * opts.labelFontSize,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_randao_extend_0().then(makeLink('randao_extend_0'));
+
+  const dashPattern = [[13, 8], [12, 8], [11, 8], [10, 8], [9, 8], [8, 8], [7, 8], [6, 8], [5, 8], [3, 8], [2, 8], [1, 8]];
+
+  async function do_randao_extend_1() {
+
+    const xVals = rs;
+    const yVals = expected;
+    for (let k = 0; k < yVals.length; k++) {
+      for (let i = 0; i < xVals.length; i++) {
+        yVals[k][i] -= k;
+      }
+    }
+
+    new roughViz.Line({
+      element: '#randao_extend_1',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y1: yVals[1],
+        y2: yVals[2],
+        y3: yVals[3],
+        y4: yVals[4],
+        y5: yVals[5],
+        y6: yVals[6],
+        y7: yVals[7],
+        y8: yVals[8],
+        y9: yVals[9],
+        y10: yVals[10],
+        y11: yVals[11],
+        y12: yVals[12],
+       },
+      x: xVals,
+      xValueFormat: xValueFormat,
+      yLabel: "Increase in expected tail",
+      yLabelDelta: -10,
+      yDomain: [-10, 12],
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+      dash: dashPattern,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      notes: [
+        {x: 800, y: 230, text: "k = 1"},
+        {x: 600, y: 160, text: "k = 12"},
+      ],
+      notesFontSize: 0.8 * opts.labelFontSize,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_randao_extend_1().then(makeLink('randao_extend_1'));
+
+  async function do_randao_extend_2() {
+
+    const xVals = rs;
+    const yVals = prob_dec;
+
+    new roughViz.Line({
+      element: '#randao_extend_2',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        y1: yVals[1],
+        y2: yVals[2],
+        y3: yVals[3],
+        y4: yVals[4],
+        y5: yVals[5],
+        y6: yVals[6],
+        y7: yVals[7],
+        y8: yVals[8],
+        y9: yVals[9],
+        y10: yVals[10],
+        y11: yVals[11],
+        y12: yVals[12],
+       },
+      x: xVals,
+      xValueFormat: xValueFormat,
+      xLabel: "Fraction of stake",
+      yLabel: "Probability of decrease in tail length",
+      xLabelDelta: 10,
+      yLabelDelta: -10,
+      yDomain: [0, 1],
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+      dash: dashPattern,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      notes: [
+        {x: 240, y: 270, text: "k = 1"},
+        {x: 530, y: 160, text: "k = 12"},
+      ],
+      notesFontSize: 0.8 * opts.labelFontSize,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_randao_extend_2().then(makeLink('randao_extend_2'));
+}
+</script>
+
+<!-- RANDAO proposals - - - - - - - - - - - - - - - - - - - - - - -  -->
+
+<div class="svg" id="randao_proposals"></div>
+<div class="svg" id="randao_proposals_percent"></div>
+<script>
+  async function do_randao_proposals() {
+
+    const xInterval = 0.05;
+    const xVals = [], exp = [], exp_1 = [], exp_n = [], per_n = [];
+    const exp_n_old = [];
+    var r = 0;
+    for (let idx = 0; r < 1 + xInterval/2; idx++) {
+      xVals[idx] = r;
+
+      // Expected number of proposals without cheating
+      exp[idx] = r * 32;
+
+      // Expected number of proposals with cheating
+      exp_1[idx] = 0;
+      exp_n[idx] = 0;
+      let p = [], q = [];
+      for (let i = 0; i < 33; i++) {
+        p[i] = prob(32, i, r);
+      }
+      for (let k = 0; k < 33; k++) {
+        q[k] = 0;
+        for (let i = 0; i <= k; i++) {
+          q[k] += p[i] * p[k] + ((k < 32) ? p[k + 1] * p[i] : 0);
+        }
+        exp_1[idx] += k * (p[k] * (1 - r) + q[k] * r);
+      }
+
+      // Iterate cheating
+      let diff = 0;
+      exp_n_old[idx] = exp_1[idx];
+      do {
+        exp_n[idx] = 0;
+        for (let k = 0; k < 33; k++) {
+          exp_n[idx] += k * (p[k] * (1 - exp_n_old[idx] / 32) + q[k] * exp_n_old[idx] / 32);
+        }
+        diff = Math.abs(exp_n[idx] - exp_n_old[idx]);
+        exp_n_old[idx] = exp_n[idx];
+      } while (diff > 0.001);
+
+      // Percentage difference
+      per_n[idx] = 100 * (exp_n[idx] / exp[idx] - 1);
+
+      r += xInterval;
+    }
+    per_n[0] = 0;
+    per_n[per_n.length - 1] = 0;
+
+    const dashPattern = [[0], [6, 6]];
+    const xValueFormat = ".2f";
+    const margin = {top: 30, right: 20, bottom: 80, left: 120};
+
+    new roughViz.Line({
+      element: '#randao_proposals',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        expected_good: exp,
+        expected_cheat_n: exp_n,
+      },
+      x: xVals,
+      xValueFormat: xValueFormat,
+      xLabel: "Fraction of stake",
+      yLabel: "Expected number of proposals per epoch",
+      xLabelDelta: 10,
+      yLabelDelta: -10,
+      yDomain: [0, 32],
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+      dash: [[0], [6, 6]],
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      notes: [
+        {x: 600, y: 160, text: "Cheating"},
+        {x: 680, y: 220, text: "Honest"},
+      ],
+      notesFontSize: 0.8 * opts.labelFontSize,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+
+    new roughViz.Line({
+      element: '#randao_proposals_percent',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        percentage_n: per_n,
+      },
+      x: xVals,
+      xValueFormat: xValueFormat,
+      xLabel: "Fraction of stake",
+      yLabel: "Percentage increase in proposals",
+      xLabelDelta: 10,
+      yLabelDelta: -10,
+      yDomain: [0, 5],
+
+      circle: false,
+      roughness: 0.3,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      colors: opts.colors,
+      strokeWidth: opts.strokeWidth,
+      interpolation: ["curve"],
+      dash: [[6, 6]],
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      margin: margin,
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+  }
+  do_randao_proposals().then(makeLink('randao_proposals')).then(makeLink('randao_proposals_percent'));
+</script>
+
+<!-- Committee Aggregators - - - - - - - - - - - - - - - - - - - - - -->
+
+<div class="svg" id="committee_aggregators"></div>
+<script>
+  async function do_committee_aggregators() {
+
+    xData = [];
+    yData = [];
+
+    nMembers = 256;
+    target = 16;
+    p = 1.0 / Math.floor(nMembers / target);
+    for (var i = 0; i <=32; i++) {
+      xData.push(i);
+      yData.push(prob(nMembers, i, p));
+    }
+
+    new roughViz.Bar({
+      element: '#committee_aggregators',
+      width: opts.width,
+      height: opts.height,
+      font: opts.font,
+
+      data: {
+        labels: xData,
+        values: yData
+      },
+      xLabel: "Number of aggregators selected from a 256 member committee",
+      yLabel: "Probability",
+      xLabelDelta: 0,
+      yLabelDelta: -10,
+
+      roughness: opts.roughness,
+      bowing: opts.bowing,
+      simplification: opts.simplification,
+
+      color: 'white',
+      fillStyle: 'solid',
+      strokeWidth: opts.strokeWidth,
+      padding: 0.01,
+
+      axisStrokeWidth: opts.axisStrokeWidth,
+      axisRoughness: opts.axisRoughness,
+      axisFontSize: opts.axisFontSize,
+      labelFontSize: opts.labelFontSize,
+
+      margin: {top: 30, right: 20, bottom: 90, left: 100},
+
+      legend: opts.legend,
+      interactive: opts.interactive,
+    });
+
+  }
+  do_committee_aggregators().then(makeLink('committee_aggregators'));
+</script>
+
+</div>
+</body>
+</html>
